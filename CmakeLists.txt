@@ -1,0 +1,126 @@
+cmake_minimum_required(VERSION 2.8)
+
+PROJECT(scan3d-capture)
+set(CMAKE_AUTOMOC ON)
+find_package(Qt5Widgets) 
+find_package(Qt5Core)
+find_package(Qt5Gui)
+find_package(Qt5OpenGL)
+
+# Set (BASEDIR "D:/projects/3DReconstruction/CalibrateProjector/scan3d-capture-src-2015")
+FILE(GLOB UI_FILES "./forms/*.ui")
+qt5_wrap_ui(WRAP_FILES ${UI_FILES})
+source_group("Ui" FILES ${UI_FILES} ${WRAP_FILES} )
+
+set(QRC_SOURCE_FILES "./assets/assets.qrc")
+qt5_add_resources(QRC_FILES ${QRC_SOURCE_FILES})
+
+set(app_ICON favicon.rc)
+set_property(SOURCE favicon.rc APPEND PROPERTY
+        OBJECT_DEPENDS ${PROJECT_SOURCE_DIR}/favicon.ico
+        )
+
+
+
+#opencv
+FIND_PACKAGE(OpenCV  REQUIRED)
+
+include_directories( ${OPENCV_INCLUDE_DIR} 
+	#./Camera
+        ./
+		${PROJECT_BINARY_DIR}
+)
+
+#vtk
+find_package(VTK REQUIRED)
+include(${VTK_USE_FILE})
+link_directories(${VTK_LIBRARY_DIRS})
+
+
+#PCL
+# find_package(PCL 1.3 REQUIRED COMPONENTS common io)     
+# include_directories(${PCL_INCLUDE_DIRS})                
+# link_directories(${PCL_LIBRARY_DIRS})                 
+# add_definitions(${PCL_DEFINITIONS}) 
+
+
+set (PCL_Root_Path "D:\\Toolkit\\PCL\\PCL\ 1.11.0")  # set your personal PCL root Path here
+
+
+set(BOOST_Head_File_Path "${PCL_Root_Path}\\3rdParty\\Boost\\include\\boost-1_73")
+set (Qhull_Head_File_Path "${PCL_Root_Path}\\3rdParty\\Qhull\\include")
+set (OpenNI2_Head_File_Path "${PCL_Root_Path}\\3rdParty\\OpenNI2\\Include")
+set (FLANN_Head_File_Path "${PCL_Root_Path}\\3rdParty\\FLANN\\include")
+set (Eigen_Head_File_Path "${PCL_Root_Path}\\3rdParty\\Eigen\\eigen3")
+set (PCL_Head_File_Path "${PCL_Root_Path}\\include\\pcl-1.11")
+
+include_directories(${BOOST_Head_File_Path} ${Qhull_Head_File_Path} ${OpenNI2_Head_File_Path} ${FLANN_Head_File_Path} ${Eigen_Head_File_Path} ${PCL_Head_File_Path})
+
+# include_directories(D:\\Toolkit\\PCL\ 1.11.0\\3rdParty\\Qhull\\include)
+# include_directories(D:\\Toolkit\\PCL\ 1.11.0\\3rdParty\\OpenNI2\\Include)
+# include_directories(D:\\Toolkit\\PCL\ 1.11.0\\3rdParty\\FLANN\\include)
+# include_directories(D:\\Toolkit\\PCL\ 1.11.0\\3rdParty\\Eigen\\eigen3)
+# include_directories(D:\\Toolkit\\PCL\ 1.11.0\\3rdParty\\Boost\\include\\boost-1_68)
+# include_directories(D:\\Toolkit\\PCL\ 1.11.0\\include\\pcl-1.11)
+
+set(BOOST_Lib_Path "${PCL_Root_Path}\\3rdParty\\Boost\\lib")
+set (Qhull_Lib_Path "${PCL_Root_Path}\\3rdParty\\Qhull\\lib")
+set (OpenNI2_Lib_Path "${PCL_Root_Path}\\3rdParty\\OpenNI2\\Lib")
+set (FLANN_Lib_Path "${PCL_Root_Path}\\3rdParty\\FLANN\\lib")
+set (PCL_Lib_Path "${PCL_Root_Path}\\lib")
+
+link_directories(${BOOST_Lib_Path} ${Qhull_Lib_Path} ${OpenNI2_Lib_Path} ${FLANN_Lib_Path} ${PCL_Lib_Path})
+
+# link_directories(D:\\Toolkit\\PCL\ 1.11.0\\3rdParty\\Qhull\\lib)
+# link_directories(D:\\Toolkit\\PCL\ 1.11.0\\3rdParty\\OpenNI2\\Lib)
+# link_directories(D:\\Toolkit\\PCL\ 1.11.0\\3rdParty\\FLANN\\lib)
+# link_directories(D:\\Toolkit\\PCL\ 1.11.0\\3rdParty\\Boost\\lib)
+# link_directories(D:\\Toolkit\\PCL\ 1.11.0\\lib)
+
+file(GLOB BOOST_Debug_Lib "${BOOST_Lib_Path}/*mt-gd-x64-1_73.lib")
+
+file(GLOB BOOST_Release_Lib "${BOOST_Lib_Path}/*mt-x64-1_73.lib")
+
+
+
+file(GLOB Qhull_Debug_Lib "${Qhull_Lib_Path}/*_d.lib")
+
+file(GLOB Qhull_Release_Lib "${Qhull_Lib_Path}/*.lib")
+
+list(REMOVE_ITEM Qhull_Release_Lib Qhull_Debug_Lib)
+
+
+
+file(GLOB OpenNI2_Debug_Lib "${OpenNI2_Lib_Path}/*.lib")
+
+file(GLOB OpenNI2_Release_Lib "${OpenNI2_Lib_Path}/*.lib")
+
+MESSAGE( STATUS "this var key = ${OpenNI2_Release_Lib}")
+
+FILE(GLOB PCL_Debug_Lib "${PCL_Lib_Path}/*d.lib")
+
+FILE(GLOB PCL_Release_Lib "${PCL_Lib_Path}/*.lib")
+
+list(REMOVE_ITEM PCL_Release_Lib PCL_Debug_Lib)
+
+
+# find_package(PCL 1.3 REQUIRED COMPONENTS common io)     
+# include_directories(${PCL_INCLUDE_DIRS})                
+# # link_directories(${PCL_LIBRARY_DIRS})                 
+# add_definitions(${PCL_DEFINITIONS}) 
+                   
+
+FILE(GLOB SRC_FILES "./*.cpp")
+FILE(GLOB HEAD_FILES "./*.hpp")
+ADD_EXECUTABLE(scan3d-capture ${SRC_FILES} ${HEAD_FILES} ${RCC_FILES} ${WRAP_FILES} ${QRC_FILES} ${app_ICON})
+
+TARGET_LINK_LIBRARIES( scan3d-capture
+	${OpenCV_LIBS} ${VTK_LIBRARIES}  Qt5::OpenGL Qt5::Widgets Qt5::Core Qt5::Gui)
+# IF(CMAKE_DEBUG_POSTFIX)
+	# TARGET_LINK_LIBRARIES( scan3d-capture
+	# ${OpenCV_LIBS} ${VTK_LIBRARIES} ${BOOST_Debug_Lib} ${Qhull_Debug_Lib} ${OpenNI2_Debug_Lib} ${PCL_Debug_Lib} Qt5::OpenGL Qt5::Widgets Qt5::Core Qt5::Gui)
+# ENDIF()
+# IF(CMAKE_RELEASE_POSTFIX)
+	# TARGET_LINK_LIBRARIES( scan3d-capture
+	# ${OpenCV_LIBS} ${VTK_LIBRARIES} ${BOOST_Release_Lib} ${Qhull_Release_Lib} ${OpenNI2_Release_Lib} ${PCL_Release_Lib} Qt5::OpenGL Qt5::Widgets Qt5::Core Qt5::Gui)
+# ENDIF()
