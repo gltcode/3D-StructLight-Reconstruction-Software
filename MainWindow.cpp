@@ -118,6 +118,28 @@ MainWindow::MainWindow(QWidget * parent, Qt::WindowFlags flags):
 	ui->display_original_radio->setChecked(true);
 	ui->display_original_radio->blockSignals(false);
 
+
+    ui->gray_code_radio->blockSignals(true);
+    if (config.value(CODE_MODE_CONFIG, CODE_MODE_DEFAULT) == Gray_Code)
+    {
+        ui->gray_code_radio->setChecked(true);
+        ui->space_code_radio->setChecked(false);
+    }
+    ui->gray_code_radio->blockSignals(false);
+
+    ui->space_code_radio->blockSignals(true);
+    if (config.value(CODE_MODE_CONFIG, CODE_MODE_DEFAULT) == Space_Code)
+    {
+        ui->space_code_radio->setChecked(true);
+        ui->gray_code_radio->setChecked(false);
+    }
+    ui->space_code_radio->blockSignals(false);
+
+
+    ui->normals_check->blockSignals(true);
+    ui->normals_check->setChecked(config.value(SAVE_NORMALS_CONFIG, SAVE_NORMALS_DEFAULT).toBool());
+    ui->normals_check->blockSignals(false);
+
 	ui->max_dist_line->blockSignals(true);
 	ui->max_dist_line->setValidator(new QDoubleValidator(this));
 	ui->max_dist_line->setText(config.value(MAX_DIST_CONFIG, MAX_DIST_DEFAULT).toString());
@@ -190,6 +212,39 @@ void MainWindow::on_display_calibration_action_triggered(bool checked)
 {
     CalibrationDialog dialog(this, Qt::WindowCloseButtonHint);
     dialog.exec();
+}
+
+void MainWindow::on_eval_calib_by_cheess_3d_action_triggered(bool checked)
+{
+
+    show_message("Calculate 3D reconstrcution Error...");
+
+    APP->processing_reset();
+    APP->processingDialog.setWindowTitle("Calculate 3D reconstruction Error");
+    APP->processingDialog.show();
+    QApplication::processEvents();
+
+    APP->eval_calibe_3d_error_by_checkeroard(this);
+
+    update_current_image();
+
+    APP->processingDialog.finish();
+    APP->processingDialog.exec();
+    APP->processingDialog.hide();
+    QApplication::processEvents();
+
+    show_message("Ready");
+
+}
+
+void MainWindow::on_eval_recons_by_board_action_triggered(bool checked)
+{
+
+}
+
+void MainWindow::on_eval_recons_by_arbit_obj_action_triggered(bool checked)
+{
+
 }
 
 void MainWindow::_on_image_tree_currentChanged(const QModelIndex & current, const QModelIndex & previous)
@@ -516,6 +571,23 @@ void MainWindow::on_display_3dview_radio_clicked(bool checked)
     }
 }
 
+void MainWindow::on_gray_code_radio_clicked(bool checked)
+{
+    if (checked)
+    {
+        APP->config.setValue(CODE_MODE_CONFIG, Gray_Code);
+    }
+}
+
+void MainWindow::on_space_code_radio_clicked(bool checked)
+{
+    if (checked)
+    {
+        APP->config.setValue(CODE_MODE_CONFIG, Space_Code);
+    }
+}
+
+
 void MainWindow::on_about_action_triggered(bool checked)
 {
     AboutDialog dialog(this, Qt::WindowCloseButtonHint);
@@ -588,7 +660,16 @@ void MainWindow::on_decode_button_clicked(bool checked)
     APP->processingDialog.show();
     QApplication::processEvents();
 
-    APP->decode_all();
+    int row = get_current_set();
+   
+    if (APP->config.value("reconstruction/Code_Mode", Gray_Code) == Gray_Code)
+    {
+        APP->decode_all();
+    }
+    else if (APP->config.value("reconstruction/Code_Mode", Space_Code) == Space_Code)
+    {
+        APP->decode(row, this);
+    }
     update_current_image();
 
     APP->processingDialog.finish();

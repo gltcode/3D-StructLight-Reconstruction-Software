@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>930</width>
-    <height>768</height>
+    <height>830</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -583,14 +583,14 @@
          <property name="bottomMargin">
           <number>6</number>
          </property>
-         <item row="0" column="0">
+         <item row="2" column="0">
           <widget class="QLabel" name="max_dist_label">
            <property name="text">
             <string>Max. ray distance</string>
            </property>
           </widget>
          </item>
-         <item row="0" column="1">
+         <item row="2" column="1">
           <widget class="QLineEdit" name="max_dist_line">
            <property name="text">
             <string>0.0</string>
@@ -600,7 +600,7 @@
            </property>
           </widget>
          </item>
-         <item row="1" column="0">
+         <item row="5" column="0">
           <widget class="QCheckBox" name="normals_check">
            <property name="toolTip">
             <string>Save point normals</string>
@@ -610,7 +610,7 @@
            </property>
           </widget>
          </item>
-         <item row="2" column="0">
+         <item row="6" column="0">
           <widget class="QCheckBox" name="colors_check">
            <property name="toolTip">
             <string>Save point colors</string>
@@ -620,13 +620,27 @@
            </property>
           </widget>
          </item>
-         <item row="3" column="0">
+         <item row="7" column="0">
           <widget class="QCheckBox" name="binary_file_check">
            <property name="toolTip">
             <string>Save pointcloud in binary format</string>
            </property>
            <property name="text">
             <string>Binary format</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="0">
+          <widget class="QRadioButton" name="gray_code_radio">
+           <property name="text">
+            <string>Gray Code</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QRadioButton" name="space_code_radio">
+           <property name="text">
+            <string>Space Code</string>
            </property>
           </widget>
          </item>
@@ -672,8 +686,29 @@
     <addaction name="save_calibration_action"/>
     <addaction name="display_calibration_action"/>
    </widget>
+   <widget class="QMenu" name="menuCalculateError">
+    <property name="title">
+     <string>Evaluate</string>
+    </property>
+    <widget class="QMenu" name="menuReconstrucion">
+     <property name="title">
+      <string>Reconstrucion</string>
+     </property>
+     <addaction name="eval_recons_by_board_action"/>
+     <addaction name="eval_recons_by_arbit_obj_action"/>
+    </widget>
+    <widget class="QMenu" name="menuCalibration_2">
+     <property name="title">
+      <string>Calibration</string>
+     </property>
+     <addaction name="eval_calib_by_cheess_3d_action"/>
+    </widget>
+    <addaction name="menuCalibration_2"/>
+    <addaction name="menuReconstrucion"/>
+   </widget>
    <addaction name="menuFile"/>
    <addaction name="menuCalibration"/>
+   <addaction name="menuCalculateError"/>
    <addaction name="menuHelp"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
@@ -720,6 +755,21 @@
   <action name="reconstruct_dump_action">
    <property name="text">
     <string>Reconstruct from dump...</string>
+   </property>
+  </action>
+  <action name="eval_recons_by_board_action">
+   <property name="text">
+    <string>By Board</string>
+   </property>
+  </action>
+  <action name="eval_recons_by_arbit_obj_action">
+   <property name="text">
+    <string>By Arbitrary Object</string>
+   </property>
+  </action>
+  <action name="eval_calib_by_cheess_3d_action">
+   <property name="text">
+    <string>By Chess Board</string>
    </property>
   </action>
  </widget>

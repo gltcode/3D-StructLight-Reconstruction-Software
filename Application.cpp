@@ -149,6 +149,10 @@ void Application::load_config(void)
     }
 
     //reconstruction
+    if (!config.value(CODE_MODE_CONFIG).isValid())
+    {
+        config.setValue(CODE_MODE_CONFIG, CODE_MODE_DEFAULT);
+    }
     if (!config.value(MAX_DIST_CONFIG).isValid())
     {
         config.setValue(MAX_DIST_CONFIG, MAX_DIST_DEFAULT);
@@ -275,6 +279,7 @@ bool Application::change_root_dir(QWidget * parent_widget)
     set_root_dir(dirname);
     return true;
 }
+
 void split(const std::string& s, std::vector<std::string>& sv, const char flag = ' ')
 {
 	sv.clear();
@@ -286,6 +291,7 @@ void split(const std::string& s, std::vector<std::string>& sv, const char flag =
 	}
 	return;
 }
+
 bool Application::get3DdataPath(unsigned level, unsigned n, std::string & FilePath)
 {
 	//try to load
@@ -319,6 +325,260 @@ bool Application::get3DdataPath(unsigned level, unsigned n, std::string & FilePa
 	std::cout << "[3D Data] Filename: " << FilePath << std::endl;
 	return true;
 }
+
+bool Application::LoadCorners()
+{
+    unsigned count = static_cast<unsigned>(model.rowCount());
+    corners_projector.clear();
+    corners_projector.resize(count);
+    corners_camera.clear();
+    corners_camera.resize(count);
+    corners_world.clear();
+    corners_world.resize(count);
+
+    for (unsigned i = 0; i < count; i++)
+    {
+        std::vector<cv::Point2f>& cam_corners = corners_camera[i];
+        std::vector<cv::Point2f>& proj_corners = corners_projector[i];
+        std::vector<cv::Point3f>& world_corners = corners_world[i];
+
+        QModelIndex parent = model.index(i, 0);
+        QString set_name = model.data(parent, Qt::DisplayRole).toString();
+        bool checked = (model.data(parent, Qt::CheckStateRole).toInt() == Qt::Checked);
+        if (!checked)
+        {   //skip
+            processing_message(QString(" * %1: skip (not selected)").arg(set_name));
+            processing_set_progress_value(i + 1);
+            continue;
+        }
+
+
+        QModelIndex index = model.index(0, 0, parent);
+        if (!index.isValid())
+        {   //invalid index
+            continue;
+        }
+
+        std::string filePath = std::string((const char*)model.data(index, ImageFilenameRole).toString().toLocal8Bit());
+        std::vector<std::string> SplitedResult;
+        split(filePath, SplitedResult, '/');
+        std::string BaseFilePath;
+        for (int i = 0; i < SplitedResult.size() - 1; i++)
+        {
+            BaseFilePath += SplitedResult[i] + std::string("/");
+        }
+        BaseFilePath = BaseFilePath.substr(0, BaseFilePath.length() - 1);
+
+        std::vector<std::string> singleLineData; // all values in the line 
+        std::string oneValueString; // every value in the line deparated by a spaces
+        //load world corners
+        if (access((BaseFilePath + "/world.txt").c_str(), 0) == 0)
+        {
+            std::ifstream inFileStream(BaseFilePath + "/world.txt");
+            while (!inFileStream.eof())
+            {
+                // every line
+                std::string lineString;
+                std::getline(inFileStream, lineString);
+                // split by spaces
+                std::stringstream stringIn(lineString);
+                singleLineData.clear();
+                while (stringIn >> oneValueString)
+                {
+                    singleLineData.push_back(oneValueString);
+                }
+                if (singleLineData.size() == 3)
+                {
+                    cv::Point3f world_point;
+                    world_point.x = std::atof(singleLineData.at(0).c_str());
+                    world_point.y = std::atof(singleLineData.at(1).c_str());
+                    world_point.z = std::atof(singleLineData.at(2).c_str());
+                    // 
+                    world_corners.push_back(world_point);
+                }
+            }
+            inFileStream.close();
+        }
+        if (access((BaseFilePath + "/proj.txt").c_str(), 0) == 0)
+        {
+            //load projector corners
+            std::ifstream inFileStream = std::ifstream(BaseFilePath + "/proj.txt");
+
+            while (!inFileStream.eof())
+            {
+                // every line
+                std::string lineString;
+                std::getline(inFileStream, lineString);
+                // split by spaces
+                std::stringstream stringIn(lineString);
+                singleLineData.clear();
+                while (stringIn >> oneValueString)
+                {
+                    singleLineData.push_back(oneValueString);
+                }
+                if (singleLineData.size() == 2)
+                {
+                    cv::Point2f proj_point;
+                    proj_point.x = std::atof(singleLineData.at(0).c_str());
+                    proj_point.y = std::atof(singleLineData.at(1).c_str());
+                    // 
+                    proj_corners.push_back(proj_point);
+                }
+            }
+            inFileStream.close();
+        }
+        //load camera corners
+        if (access((BaseFilePath + "/cam.txt").c_str(), 0) == 0)
+        {
+
+            std::ifstream inFileStream = std::ifstream(BaseFilePath + "/cam.txt");
+
+            while (!inFileStream.eof())
+            {
+                // every line
+                std::string lineString;
+                std::getline(inFileStream, lineString);
+                // split by spaces
+                std::stringstream stringIn(lineString);
+                singleLineData.clear();
+                while (stringIn >> oneValueString)
+                {
+                    singleLineData.push_back(oneValueString);
+                }
+                if (singleLineData.size() == 2)
+                {
+                    cv::Point2f cam_point;
+                    cam_point.x = std::atof(singleLineData.at(0).c_str());
+                    cam_point.y = std::atof(singleLineData.at(1).c_str());
+                    // 
+                    cam_corners.push_back(cam_point);
+                }
+            }
+            inFileStream.close();
+        }
+    }
+    
+    return true;
+}
+
+bool Application::eval_calibe_3d_error_by_checkeroard(QWidget* parent_widget)
+{   
+    if (!calib.is_valid())
+    {   //invalid calibration
+        QMessageBox::critical(parent_widget, "Error", "No valid calibration found.");
+        return false;
+    }
+    LoadCorners();
+
+    unsigned count = static_cast<unsigned>(model.rowCount());
+
+    std::vector<double> DistanceList;
+    for (unsigned i = 0; i < count; i++)
+    {
+        QModelIndex index = model.index(i, 0);
+        QString set_name = model.data(index, Qt::DisplayRole).toString();
+        bool checked = (model.data(index, Qt::CheckStateRole).toInt() == Qt::Checked);
+        if (!checked)
+        {   //skip
+            processing_message(QString(" * %1: skip (not selected)").arg(set_name));
+            processing_set_progress_value(i + 1);
+            continue;
+        }
+        processing_set_current_message(QString("Calculate 3D coordinatives of corners... %1").arg(set_name));
+
+        std::vector<cv::Point2f> & cam_corners = corners_camera.at(i);
+        std::vector<cv::Point2f> & proj_corners = corners_projector.at(i);
+        std::vector<cv::Point3f> & world_corners = corners_world.at(i);
+        if (i >= corners_camera.size())
+        {
+            continue;
+        }
+        if (cam_corners.size() == 0||proj_corners.size()==0) //This image has not been proessed
+        {
+            processing_message(QString(" * %1 : Calculate projector corners").arg(set_name));
+            corner_count = cv::Size(config.value("main/corner_count_x").toUInt(), config.value("main/corner_count_y").toUInt()); //interior number of corners
+            corner_size = cv::Size2f(config.value("main/corners_width").toDouble(), config.value("main/corners_height").toDouble());
+            //calculate camera corners
+            extract_chessboard_corners_from_single_image(i, 0);
+            cam_corners= corners_camera.at(i);
+            if (cam_corners.size() != corner_count.width * corner_count.height)
+            {
+                processing_message(QString(" * %1 : Failed to extract conrners,extract %2 Corners").arg(set_name).arg(cam_corners.size()));
+                corners_camera.at(i).clear();
+                continue;
+            }
+            //calculate projector corners
+            const unsigned threshold = config.value("main/shadow_threshold", 0).toUInt();
+            if (pattern_list.size() < model.rowCount<size_t>())
+            {
+                pattern_list.resize(model.rowCount());
+            }
+            if (min_max_list.size() < model.rowCount<size_t>())
+            {
+                min_max_list.resize(model.rowCount());
+            }
+   
+            processing_set_current_message(QString("Decoding... %1").arg(set_name));
+            cv::Mat& pattern_image = pattern_list[i];
+            cv::Mat& min_max_image = min_max_list[i];
+            if (!decode_gray_set(i, pattern_image, min_max_image))
+            {   //error
+                std::cout << "ERROR: Decode image set " << i << " failed. " << std::endl;
+                return false;
+            }
+            cv::Size imageSize(0, 0);
+            if (imageSize.width == 0)
+            {
+                imageSize = pattern_image.size();
+            }
+            else if (imageSize != pattern_image.size())
+            {
+                std::cout << "ERROR: pattern image of different size: set " << i << std::endl;
+                return false;
+            }
+
+            //cv::Mat out_pattern_image = sl::PIXEL_UNCERTAIN*cv::Mat::ones(pattern_image.size(), pattern_image.type());
+
+            processing_set_current_message(QString("Computing homographies... %1").arg(set_name));
+
+            calculate_projector_corners(cam_corners, proj_corners, pattern_image, min_max_image, threshold);
+
+
+
+            //save corners
+            save_corners_in_one_file(i, world_corners, cam_corners, proj_corners);
+
+            processing_message(QString(" * %1: finished").arg(set_name));
+            processing_set_progress_value(i + 1);
+        }
+      
+        bool visualize_registration_result = true;
+        double distance = calculte_3d_chessboard_distance(cam_corners, proj_corners, world_corners, visualize_registration_result);
+        DistanceList.push_back(distance);
+
+        if (processing_canceled())
+        {
+            processing_set_current_message("Extract corners canceled");
+            processing_message("Extract corners canceled");
+            return false;
+        }
+
+    }
+
+
+    double average_distance = 0;
+    for (int i = 0; i < DistanceList.size(); i++)
+    {
+        average_distance += DistanceList[i];
+        std::cout << DistanceList[i] << std::endl;
+    }
+    average_distance /= DistanceList.size();
+
+    processing_message(QString(" The average distance is: %1  mm").arg(average_distance));
+
+    return true;
+}
+
 
 const cv::Mat Application::get_image(unsigned level, unsigned n, Role role) const
 {
@@ -403,6 +663,98 @@ int Application::get_projector_height(unsigned level) const
     return 0;
 }
 
+bool Application::extract_chessboard_corners_from_single_image(unsigned level,unsigned n)
+{
+    cv::Size imageSize(0, 0);
+    int image_scale = 1;
+    cv::Mat gray_image = get_image(level, n, GrayImageRole);
+
+    if (gray_image.rows < 1)
+    {
+        processing_set_progress_value(level + 1);
+        return false;
+    }
+
+    if (imageSize.width == 0)
+    {   //init image size
+        imageSize = gray_image.size();
+        if (imageSize.width > 1024)
+        {
+            image_scale = cvRound(imageSize.width / 1024.0);
+        }
+    }
+    else if (imageSize != gray_image.size())
+    {   //error
+        std::cout << "ERROR: image of different size: set " << level << std::endl;
+        return false;
+    }
+
+    cv::Mat small_img;
+
+    if (image_scale > 1)
+    {
+        cv::resize(gray_image, small_img, cv::Size(gray_image.cols / image_scale, gray_image.rows / image_scale));
+    }
+    else
+    {
+        gray_image.copyTo(small_img);
+    }
+
+    if (processing_canceled())
+    {
+        processing_set_current_message("Extract corners canceled");
+        processing_message("Extract corners canceled");
+        return false;
+    }
+
+    //this will be filled by the detected corners
+    bool cognex_chessboard = false;
+    std::vector<cv::Point2f>& cam_corners = corners_camera[level];
+    std::vector<cv::Point3f>& world_corners = corners_world[level];
+    if (cv::findChessboardCorners(small_img, corner_count, cam_corners))
+        //cv::CALIB_CB_ADAPTIVE_THRESH + cv::CALIB_CB_NORMALIZE_IMAGE /*+ cv::CALIB_CB_FILTER_QUADS*/))
+    {
+        QModelIndex index = model.index(level, 0);
+        QString set_name = model.data(index, Qt::DisplayRole).toString();
+        processing_message(QString(" * %1: found %2 corners").arg(set_name).arg(cam_corners.size()));
+        std::cout << " - corners: " << cam_corners.size() << std::endl;
+
+        get_chessboard_world_coords(world_corners, corner_count, corner_size);
+    }
+#ifdef USE_COGNEX
+    else
+    {
+        //try cognex cal
+        if (cognex::extract_corners(gray_image, cam_corners, world_corners))
+        {   //cognex cal plate not found
+            processing_message(QString(" * %1: Cognex chessboard found").arg(set_name));
+            cognex_chessboard = true;
+        }
+        else
+        {   //cognex cal plate not found
+            all_found = false;
+            processing_message(QString(" * %1: chessboard not found!").arg(set_name));
+            std::cout << " - chessboard not found!" << std::endl;
+        }
+    }
+#endif //USE_COGNEX
+
+    if (!cognex_chessboard)
+    {
+        for (std::vector<cv::Point2f>::iterator iter = cam_corners.begin(); iter != cam_corners.end(); iter++)
+        {
+            *iter = image_scale * (*iter);
+        }
+        if (cam_corners.size())
+        {
+            cv::cornerSubPix(gray_image, cam_corners, cv::Size(11, 11), cv::Size(-1, -1),
+                cv::TermCriteria(cv::TermCriteria::MAX_ITER + cv::TermCriteria::EPS, 30, 0.1)
+                //cv::TermCriteria(CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 30, 0.1)
+            );
+        }
+    }
+}
+
 bool Application::extract_chessboard_corners(void)
 {
     corner_count = cv::Size(config.value("main/corner_count_x").toUInt(), config.value("main/corner_count_y").toUInt()); //interior number of corners
@@ -419,8 +771,7 @@ bool Application::extract_chessboard_corners(void)
     corners_world.resize(count);
     corners_camera.resize(count);
 
-    cv::Size imageSize(0,0);
-    int image_scale = 1;
+
 
     bool all_found = true;
     for (unsigned i=0; i<count; i++)
@@ -436,90 +787,7 @@ bool Application::extract_chessboard_corners(void)
         }
         processing_set_current_message(QString("Extracting corners... %1").arg(set_name));
 
-        cv::Mat gray_image = get_image(i, 0, GrayImageRole);
-
-        if (gray_image.rows<1)
-        {
-            processing_set_progress_value(i+1);
-            continue;
-        }
-
-        if (imageSize.width==0)
-        {   //init image size
-            imageSize = gray_image.size();
-            if (imageSize.width>1024)
-            {
-                image_scale = cvRound(imageSize.width/1024.0);
-            }
-        }
-        else if (imageSize != gray_image.size())
-        {   //error
-            std::cout << "ERROR: image of different size: set " << i << std::endl;
-            return false;
-        }
-
-        cv::Mat small_img;
-
-        if (image_scale>1)
-        {
-            cv::resize(gray_image, small_img, cv::Size(gray_image.cols/image_scale, gray_image.rows/image_scale));
-        }
-        else
-        {
-            gray_image.copyTo(small_img);
-        }
-
-        if (processing_canceled())
-        {
-            processing_set_current_message("Extract corners canceled");
-            processing_message("Extract corners canceled");
-            return false;
-        }
-
-        //this will be filled by the detected corners
-        bool cognex_chessboard = false;
-        std::vector<cv::Point2f> & cam_corners = corners_camera[i];
-        std::vector<cv::Point3f> & world_corners = corners_world[i];
-		if (cv::findChessboardCorners(small_img, corner_count, cam_corners))
-                     //cv::CALIB_CB_ADAPTIVE_THRESH + cv::CALIB_CB_NORMALIZE_IMAGE /*+ cv::CALIB_CB_FILTER_QUADS*/))
-        {
-            processing_message(QString(" * %1: found %2 corners").arg(set_name).arg(cam_corners.size()));
-            std::cout << " - corners: " << cam_corners.size() << std::endl;
-
-            get_chessboard_world_coords(world_corners, corner_count, corner_size);
-        }
-#ifdef USE_COGNEX
-        else
-        {
-            //try cognex cal
-            if (cognex::extract_corners(gray_image, cam_corners, world_corners))
-            {   //cognex cal plate not found
-                processing_message(QString(" * %1: Cognex chessboard found").arg(set_name));
-                cognex_chessboard = true;
-            }
-            else
-            {   //cognex cal plate not found
-                all_found = false;
-                processing_message(QString(" * %1: chessboard not found!").arg(set_name));
-                std::cout << " - chessboard not found!" << std::endl;
-            }
-        }
-#endif //USE_COGNEX
-
-        if (!cognex_chessboard)
-        {
-            for (std::vector<cv::Point2f>::iterator iter=cam_corners.begin(); iter!=cam_corners.end(); iter++)
-            {
-                *iter = image_scale*(*iter);
-            }
-            if (cam_corners.size())
-            {
-                cv::cornerSubPix(gray_image, cam_corners, cv::Size(11, 11), cv::Size(-1, -1), 
-									cv::TermCriteria(cv::TermCriteria::MAX_ITER + cv::TermCriteria::EPS, 30, 0.1)
-                                    //cv::TermCriteria(CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 30, 0.1)
-				);
-            }
-        }
+        extract_chessboard_corners_from_single_image(i, 0);
 
         processing_set_progress_value(i+1);
     }
@@ -531,81 +799,84 @@ bool Application::extract_chessboard_corners(void)
 
 void Application::decode_all(void)
 {
-    unsigned count = static_cast<unsigned>(model.rowCount());
-    cv::Size imageSize(0,0);
 
-    processing_set_progress_total(count);
-    processing_set_progress_value(0);
-    processing_set_current_message("Decoding...");
+        unsigned count = static_cast<unsigned>(model.rowCount());
+        cv::Size imageSize(0, 0);
 
-    pattern_list.resize(count);
-    min_max_list.resize(count);
+        processing_set_progress_total(count);
+        processing_set_progress_value(0);
+        processing_set_current_message("Decoding...");
 
-    QString path = config.value("main/root_dir").toString();
- 
-    //decode gray patterns
-    for (unsigned i=0; i<count; i++)
-    {
-        QModelIndex index = model.index(i, 0);
-        QString set_name = model.data(index, Qt::DisplayRole).toString();
-        bool checked = (model.data(index, Qt::CheckStateRole).toInt()==Qt::Checked);
-        if (!checked)
-        {   //skip
-            processing_message(QString(" * %1: skipped [not selected]").arg(set_name));
-            processing_set_progress_value(i+1);
-            continue;
-        }
+        pattern_list.resize(count);
+        min_max_list.resize(count);
 
-        processing_set_current_message(QString("Decoding... %1").arg(set_name));
+        QString path = config.value("main/root_dir").toString();
 
-        cv::Mat & pattern_image = pattern_list[i];
-        cv::Mat & min_max_image = min_max_list[i];
-        if (!decode_gray_set(i, pattern_image, min_max_image))
-        {   //error
-            std::cout << "ERROR: Decode image set " << i << " failed. " << std::endl;
-            return;
-        }
-
-        if (processing_canceled())
+        //decode gray patterns
+        for (unsigned i = 0; i < count; i++)
         {
-            processing_set_current_message("Decode canceled");
-            processing_message("Decode canceled");
-            return;
+            QModelIndex index = model.index(i, 0);
+            QString set_name = model.data(index, Qt::DisplayRole).toString();
+            bool checked = (model.data(index, Qt::CheckStateRole).toInt() == Qt::Checked);
+            if (!checked)
+            {   //skip
+                processing_message(QString(" * %1: skipped [not selected]").arg(set_name));
+                processing_set_progress_value(i + 1);
+                continue;
+            }
+
+            processing_set_current_message(QString("Decoding... %1").arg(set_name));
+
+            cv::Mat& pattern_image = pattern_list[i];
+            cv::Mat& min_max_image = min_max_list[i];
+            if (!decode_gray_set(i, pattern_image, min_max_image))
+            {   //error
+                std::cout << "ERROR: Decode image set " << i << " failed. " << std::endl;
+                return;
+            }
+
+            if (processing_canceled())
+            {
+                processing_set_current_message("Decode canceled");
+                processing_message("Decode canceled");
+                return;
+            }
+
+            if (imageSize.width == 0)
+            {
+                imageSize = pattern_image.size();
+            }
+            else if (imageSize != pattern_image.size())
+            {
+                processing_message(QString("ERROR: pattern image of different size: set %1").arg(set_name));
+                std::cout << "ERROR: pattern image of different size: set " << i << std::endl;
+                return;
+            }
+            else if (get_projector_width(0) != get_projector_width(i) || get_projector_height(0) != get_projector_height(i))
+            {
+                QString error_message = QString("ERROR: projector resolution does not match: set %1 [expected %2x%3, got %4x%5").arg(set_name)
+                    .arg(get_projector_width(0)).arg(get_projector_height(0)).arg(get_projector_width(i)).arg(get_projector_height(i));
+                processing_message(error_message);
+                std::cout << std::string((const char*)error_message.toLocal8Bit()) << std::endl;
+                return;
+            }
+
+            //save pattern image as PGM for debugging
+            //QString filename = path + "/" + set_name;
+            //io_util::write_pgm(pattern_image, qPrintable(filename));
+
+            processing_message(QString(" * %1: decoded").arg(set_name));
+            processing_set_progress_value(i + 1);
         }
 
-        if (imageSize.width==0)
-        {
-            imageSize = pattern_image.size();
-        }
-        else if (imageSize != pattern_image.size())
-        {
-            processing_message(QString("ERROR: pattern image of different size: set %1").arg(set_name));
-            std::cout << "ERROR: pattern image of different size: set " << i << std::endl;
-            return;
-        }
-        else if (get_projector_width(0)!=get_projector_width(i) || get_projector_height(0)!=get_projector_height(i))
-        {
-            QString error_message = QString("ERROR: projector resolution does not match: set %1 [expected %2x%3, got %4x%5").arg(set_name)
-                        .arg(get_projector_width(0)).arg(get_projector_height(0)).arg(get_projector_width(i)).arg(get_projector_height(i));
-            processing_message(error_message);
-            std::cout << std::string((const char *)error_message.toLocal8Bit()) << std::endl;
-            return;
-        }
-
-        //save pattern image as PGM for debugging
-        //QString filename = path + "/" + set_name;
-        //io_util::write_pgm(pattern_image, qPrintable(filename));
-
-        processing_message(QString(" * %1: decoded").arg(set_name));
-        processing_set_progress_value(i+1);
-    }
-
-    processing_set_current_message("Decode finished");
-    processing_set_progress_value(count);
+        processing_set_current_message("Decode finished");
+        processing_set_progress_value(count);
+    
 }
 
 void Application::decode(int level, QWidget * parent_widget)
 {
+
     if (level<0 || level>=model.rowCount())
     {   //invalid row
         return;
@@ -621,10 +892,19 @@ void Application::decode(int level, QWidget * parent_widget)
 
     cv::Mat & pattern_image = pattern_list[level];
     cv::Mat & min_max_image = min_max_list[level];
-
-    if (!decode_gray_set(level, pattern_image, min_max_image, parent_widget))
-    {   //error
-        std::cout << "ERROR: Decode image set " << level << " failed. " << std::endl;
+    if (APP->config.value("reconstruction/Code_Mode", Gray_Code) == Gray_Code)
+    {
+        if (!decode_gray_set(level, pattern_image, min_max_image, parent_widget))
+        {   //error
+            std::cout << "ERROR: Decode image set " << level << " failed. " << std::endl;
+        }
+    }
+    else if (APP->config.value("reconstruction/Code_Mode", Space_Code) == Space_Code)
+    {
+        if (!decode_space_set(level, pattern_image, min_max_image, parent_widget))
+        {   //error
+            std::cout << "ERROR: Decode image set " << level << " failed. " << std::endl;
+        }
     }
 }
 
@@ -792,6 +1072,259 @@ bool Application::load_dump(const char* filename, int type, cv::Mat2f & pattern_
     return true;
 }
 
+void Application::calculate_projector_corners(std::vector<cv::Point2f>const &  cam_corners, std::vector<cv::Point2f> & proj_corners, cv::Mat& pattern_image, cv::Mat& min_max_image,unsigned threshold)
+{
+    for (std::vector<cv::Point2f>::const_iterator iter = cam_corners.cbegin(); iter != cam_corners.cend(); iter++)
+    {
+        const cv::Point2f& p = *iter;
+        cv::Point2f q;
+
+        if (processing_canceled())
+        {
+            processing_set_current_message("Calibration canceled");
+            processing_message("Calibration canceled");
+            return;
+        }
+        processEvents();
+
+        //find an homography around p
+        unsigned WINDOW_SIZE = config.value(HOMOGRAPHY_WINDOW_CONFIG, HOMOGRAPHY_WINDOW_DEFAULT).toUInt() / 2;
+        std::vector<cv::Point2f> img_points, proj_points;
+        if (p.x > WINDOW_SIZE && p.y > WINDOW_SIZE && p.x + WINDOW_SIZE < pattern_image.cols && p.y + WINDOW_SIZE < pattern_image.rows)
+        {
+            for (unsigned h = p.y - WINDOW_SIZE; h < p.y + WINDOW_SIZE; h++)
+            {
+                register const cv::Vec2f* row = pattern_image.ptr<cv::Vec2f>(h);
+                register const cv::Vec2b* min_max_row = min_max_image.ptr<cv::Vec2b>(h);
+                //cv::Vec2f * out_row = out_pattern_image.ptr<cv::Vec2f>(h);
+                for (unsigned w = p.x - WINDOW_SIZE; w < p.x + WINDOW_SIZE; w++)
+                {
+                    const cv::Vec2f& pattern = row[w];
+                    const cv::Vec2b& min_max = min_max_row[w];
+                    //cv::Vec2f & out_pattern = out_row[w];
+                    if (sl::INVALID(pattern))
+                    {
+                        continue;
+                    }
+                    if ((min_max[1] - min_max[0]) < static_cast<int>(threshold))
+                    {   //apply threshold and skip
+                        continue;
+                    }
+
+                    img_points.push_back(cv::Point2f(w, h));
+                    proj_points.push_back(cv::Point2f(pattern));
+
+                    //out_pattern = pattern;
+                }
+            }
+            cv::Mat H = cv::findHomography(img_points, proj_points, cv::RANSAC);
+            //std::cout << " H:\n" << H << std::endl;
+            cv::Point3d Q = cv::Point3d(cv::Mat(H * cv::Mat(cv::Point3d(p.x, p.y, 1.0))));
+            q = cv::Point2f(Q.x / Q.z, Q.y / Q.z);
+        }
+        else
+        {
+            return;
+        }
+
+        //save
+        proj_corners.push_back(q);
+    }
+}
+
+double Application::calculte_3d_chessboard_distance(std::vector<cv::Point2f> & camera_corners, std::vector<cv::Point2f>& projector_corners, std::vector<cv::Point3f>& world_corners, bool visualize_registration_result)
+{
+    vtkSmartPointer<vtkPoints> world_points = vtkSmartPointer<vtkPoints>::New();
+    vtkSmartPointer<vtkPoints> reconstruct_points = vtkSmartPointer<vtkPoints>::New();
+
+    cv::Mat Rt = calib.R.t();
+    double max_dist = config.value(MAX_DIST_CONFIG, MAX_DIST_DEFAULT).toDouble();
+    for (int corners_index = 0; corners_index < camera_corners.size(); corners_index++)
+    {
+        cv::Point3f world_point = world_corners[corners_index];
+        world_points->InsertNextPoint(world_point.x, world_point.y, world_point.z);
+
+        cv::Point3d p;               //reconstructed point
+        cv::Point2d cam(camera_corners[corners_index].x, camera_corners[corners_index].y);
+        cv::Point2d proj(projector_corners[corners_index].x, projector_corners[corners_index].y);
+        scan3d::triangulate_stereo(calib.cam_K, calib.cam_kc, calib.proj_K, calib.proj_kc, Rt, calib.T, cam, proj, p, &max_dist);
+        reconstruct_points->InsertNextPoint(p.x, p.y, p.z);
+    }
+
+    vtkSmartPointer<vtkLandmarkTransform> landmarktransform = vtkSmartPointer<vtkLandmarkTransform>::New();
+
+    landmarktransform->SetSourceLandmarks(reconstruct_points);
+    landmarktransform->SetTargetLandmarks(world_points);
+
+    landmarktransform->SetModeToRigidBody();
+
+    landmarktransform->Update();
+
+
+    vtkSmartPointer<vtkPolyData> reconstruct_points_polydata = vtkSmartPointer<vtkPolyData>::New();
+    reconstruct_points_polydata->SetPoints(reconstruct_points);
+
+    vtkSmartPointer<vtkPolyData> world_points_polydata = vtkSmartPointer<vtkPolyData>::New();
+    world_points_polydata->SetPoints(world_points);
+
+    vtkSmartPointer<vtkTransformPolyDataFilter> transformFilter =
+        vtkSmartPointer<vtkTransformPolyDataFilter>::New();
+    transformFilter->SetInputData(reconstruct_points_polydata);
+    transformFilter->SetTransform(landmarktransform);
+    transformFilter->Update();
+
+
+    vtkSmartPointer<vtkPolyData> transformed_reconstruct_points_polydata = vtkSmartPointer<vtkPolyData>::New();
+    transformed_reconstruct_points_polydata = transformFilter->GetOutput();
+    double distance = 0;
+    for (int point_index = 0; point_index < transformed_reconstruct_points_polydata->GetNumberOfPoints(); point_index++)
+    {
+        double P_t[3];
+        double P_w[3];
+        transformed_reconstruct_points_polydata->GetPoint(point_index, P_t);
+
+        world_points_polydata->GetPoint(point_index, P_w);
+
+        distance += pow(pow(P_w[0] - P_t[0], 2) + pow(P_w[1] - P_t[1], 2) + pow(P_w[2] - P_t[2], 2), 0.5);
+
+    }
+
+
+    if (visualize_registration_result)
+    {/////////////////////
+        vtkSmartPointer<vtkVertexGlyphFilter> sourceGlyphFilter =
+            vtkSmartPointer<vtkVertexGlyphFilter>::New();
+        sourceGlyphFilter->SetInputData(reconstruct_points_polydata);
+        sourceGlyphFilter->Update();
+
+        vtkSmartPointer<vtkVertexGlyphFilter> targetGlyphFilter =
+            vtkSmartPointer<vtkVertexGlyphFilter>::New();
+        targetGlyphFilter->SetInputData(world_points_polydata);
+        targetGlyphFilter->Update();
+        ////////////////源数据施加配准变换矩阵
+        vtkSmartPointer<vtkTransformPolyDataFilter> transformFilter_for_display =
+            vtkSmartPointer<vtkTransformPolyDataFilter>::New();
+        transformFilter_for_display->SetInputData(sourceGlyphFilter->GetOutput());
+        transformFilter_for_display->SetTransform(landmarktransform);
+        transformFilter_for_display->Update();
+
+        /////////////////////////////////////////////////////////
+        vtkSmartPointer<vtkPolyDataMapper> sourceMapper =
+            vtkSmartPointer<vtkPolyDataMapper>::New();
+        sourceMapper->SetInputConnection(sourceGlyphFilter->GetOutputPort());
+
+        vtkSmartPointer<vtkActor> sourceActor =
+            vtkSmartPointer<vtkActor>::New();
+        sourceActor->SetMapper(sourceMapper);
+        sourceActor->GetProperty()->SetColor(1, 1, 0);
+        sourceActor->GetProperty()->SetPointSize(10);
+
+        vtkSmartPointer<vtkPolyDataMapper> targetMapper =
+            vtkSmartPointer<vtkPolyDataMapper>::New();
+        targetMapper->SetInputConnection(targetGlyphFilter->GetOutputPort());
+
+        vtkSmartPointer<vtkActor> targetActor =
+            vtkSmartPointer<vtkActor>::New();
+        targetActor->SetMapper(targetMapper);
+        targetActor->GetProperty()->SetColor(0, 1, 0);
+        targetActor->GetProperty()->SetPointSize(10);
+
+        vtkSmartPointer<vtkPolyDataMapper> solutionMapper =
+            vtkSmartPointer<vtkPolyDataMapper>::New();
+        solutionMapper->SetInputConnection(transformFilter_for_display->GetOutputPort());
+
+        vtkSmartPointer<vtkActor> solutionActor =
+            vtkSmartPointer<vtkActor>::New();
+        solutionActor->SetMapper(solutionMapper);
+        solutionActor->GetProperty()->SetColor(1, 0, 0);
+        solutionActor->GetProperty()->SetPointSize(10);
+        ////////////////////
+        vtkSmartPointer<vtkRenderer> render =
+            vtkSmartPointer<vtkRenderer>::New();
+        render->AddActor(sourceActor);
+        render->AddActor(targetActor);
+        render->AddActor(solutionActor);
+        render->SetBackground(0, 0, 0);
+
+        vtkSmartPointer<vtkRenderWindow> rw =
+            vtkSmartPointer<vtkRenderWindow>::New();
+        rw->AddRenderer(render);
+        rw->SetSize(480, 480);
+        rw->SetWindowName("Regisration by Landmark");
+        //设置坐标系显示功能
+        vtkSmartPointer<vtkAxesActor> axes =
+            vtkSmartPointer<vtkAxesActor>::New();
+        axes->SetScale(10);
+        render->AddActor(axes);
+
+        vtkSmartPointer<vtkRenderWindowInteractor> rwi =
+            vtkSmartPointer<vtkRenderWindowInteractor>::New();
+        rwi->SetRenderWindow(rw);
+        /************************************************************/
+        vtkSmartPointer<vtkOrientationMarkerWidget> widget =
+            vtkSmartPointer<vtkOrientationMarkerWidget>::New();
+        widget->SetOutlineColor(0.9300, 0.5700, 0.1300);
+        widget->SetOrientationMarker(axes);
+        widget->SetInteractor(rwi); //加入鼠标交互
+        widget->SetViewport(0.0, 0.0, 0.3, 0.3);  //设置显示位置
+        widget->SetEnabled(1);
+        widget->InteractiveOn();//开启鼠标交互
+        /************************************************************/
+        render->ResetCamera();
+        rw->Render();
+        rwi->Initialize();
+        rwi->Start();
+    }
+    return distance / (double)transformed_reconstruct_points_polydata->GetNumberOfPoints();
+
+}
+
+void Application::save_corners_in_one_file(int level,std::vector<cv::Point3f> const& world_corners, std::vector<cv::Point2f> const& cam_corners, std::vector<cv::Point2f> const& proj_corners)
+{
+    QString path = config.value("main/root_dir").toString();
+
+    QModelIndex parent = model.index(level, 0);
+    std::string FileFolder = std::string((const char*)model.data(parent, Qt::DisplayRole).toString().toLocal8Bit());
+
+    QString filename0 = QString("%1/%2/world.txt").arg(path).arg(FileFolder.c_str());
+    FILE* fp0 = fopen(qPrintable(filename0), "w");
+    if (!fp0)
+    {
+        std::cout << "ERROR: could no open " << std::string((const char*)filename0.toLocal8Bit()) << std::endl;
+        return;
+    }
+    QString filename1 = QString("%1/%2/cam.txt").arg(path).arg(FileFolder.c_str());
+    FILE* fp1 = fopen(qPrintable(filename1), "w");
+    if (!fp1)
+    {
+        std::cout << "ERROR: could no open " << std::string((const char*)filename1.toLocal8Bit()) << std::endl;
+        return;
+    }
+    QString filename2 = QString("%1/%2/proj.txt").arg(path).arg(FileFolder.c_str());
+    FILE* fp2 = fopen(qPrintable(filename2), "w");
+    if (!fp2)
+    {
+        fclose(fp1);
+        std::cout << "ERROR: could no open " << std::string((const char*)filename2.toLocal8Bit()) << std::endl;
+        return;
+    }
+    std::cout << "Saved " << std::string((const char*)filename0.toLocal8Bit()) << std::endl;
+    std::cout << "Saved " << std::string((const char*)filename1.toLocal8Bit()) << std::endl;
+    std::cout << "Saved " << std::string((const char*)filename2.toLocal8Bit()) << std::endl;
+
+    std::vector<cv::Point3f>::const_iterator iter0 = world_corners.begin();
+    std::vector<cv::Point2f>::const_iterator iter1 = cam_corners.begin();
+    std::vector<cv::Point2f>::const_iterator iter2 = proj_corners.begin();
+    for (unsigned j = 0; j < world_corners.size(); j++, ++iter0, ++iter1, ++iter2)
+    {
+        fprintf(fp0, "%lf %lf %lf\n", iter0->x, iter0->y, iter0->z);
+        fprintf(fp1, "%lf %lf\n", iter1->x, iter1->y);
+        fprintf(fp2, "%lf %lf\n", iter2->x, iter2->y);
+    }
+    fclose(fp0);
+    fclose(fp1);
+    fclose(fp2);
+}
 void Application::calibrate(void)
 {   //try to calibrate the camera, projector, and stereo system
 
@@ -806,10 +1339,12 @@ void Application::calibrate(void)
 
     //detect corners ////////////////////////////////////
     processing_message("Extracting corners:");
-    if (!extract_chessboard_corners())
-    {
-        return;
-    }
+
+    LoadCorners();
+    //if (!extract_chessboard_corners())
+    //{
+    //    return;
+    //}
     processing_message("");
 
     //collect projector correspondences
@@ -817,14 +1352,15 @@ void Application::calibrate(void)
     pattern_list.resize(count);
     min_max_list.resize(count);
 
+
+
     processing_set_progress_total(count);
     processing_set_progress_value(0);
     processing_set_current_message("Decoding and computing homographies...");
 
     for (unsigned i=0; i<count; i++)
     {
-        std::vector<cv::Point2f> const& cam_corners = corners_camera[i];
-        std::vector<cv::Point2f> & proj_corners = corners_projector[i];
+
 
         QModelIndex index = model.index(i, 0);
         QString set_name = model.data(index, Qt::DisplayRole).toString();
@@ -835,93 +1371,110 @@ void Application::calibrate(void)
             processing_set_progress_value(i+1);
             continue;
         }
-
-        //checked: use this set
-        proj_corners.clear(); //erase previous points
-
-        processing_set_current_message(QString("Decoding... %1").arg(set_name));
-
-        cv::Mat & pattern_image = pattern_list[i];
-        cv::Mat & min_max_image = min_max_list[i];
-        if (!decode_gray_set(i, pattern_image, min_max_image))
-        {   //error
-            std::cout << "ERROR: Decode image set " << i << " failed. " << std::endl;
+        if (imageSize.width == 0)
+        {
+            imageSize = get_image(i,0).size();
+        }
+        else if (imageSize != get_image(i, 0).size())
+        {
+            std::cout << "ERROR: source image of different size: set " << i << std::endl;
             return;
         }
 
-        if (imageSize.width==0)
+        std::vector<cv::Point2f>& cam_corners = corners_camera[i];
+        std::vector<cv::Point2f>& proj_corners = corners_projector[i];
+        std::vector<cv::Point3f>& world_corners = corners_world[i];
+        if (cam_corners.size() == 0 || proj_corners.size() == 0) //This image has not been proessed
         {
-            imageSize = pattern_image.size();
-        }
-        else if (imageSize != pattern_image.size())
-        {
-            std::cout << "ERROR: pattern image of different size: set " << i << std::endl;
-            return;
-        }
-
-        //cv::Mat out_pattern_image = sl::PIXEL_UNCERTAIN*cv::Mat::ones(pattern_image.size(), pattern_image.type());
-
-        processing_set_current_message(QString("Computing homographies... %1").arg(set_name));
-
-        for (std::vector<cv::Point2f>::const_iterator iter=cam_corners.cbegin(); iter!=cam_corners.cend(); iter++)
-        {
-            const cv::Point2f & p = *iter;
-            cv::Point2f q;
-
-            if (processing_canceled())
+            processing_message(QString(" * %1 : Calculate projector corners").arg(set_name));
+            corner_count = cv::Size(config.value("main/corner_count_x").toUInt(), config.value("main/corner_count_y").toUInt()); //interior number of corners
+            corner_size = cv::Size2f(config.value("main/corners_width").toDouble(), config.value("main/corners_height").toDouble());
+            //calculate camera corners
+            extract_chessboard_corners_from_single_image(i, 0);
+            cam_corners = corners_camera.at(i);
+            if (cam_corners.size() != corner_count.width * corner_count.height)
             {
-                processing_set_current_message("Calibration canceled");
-                processing_message("Calibration canceled");
-                return;
+                processing_message(QString(" * %1 : Failed to extract conrners,extract %2 Corners").arg(set_name).arg(cam_corners.size()));
+                corners_camera.at(i).clear();
+                continue;
             }
-            processEvents();
-
-            //find an homography around p
-            unsigned WINDOW_SIZE = config.value(HOMOGRAPHY_WINDOW_CONFIG, HOMOGRAPHY_WINDOW_DEFAULT).toUInt()/2;
-            std::vector<cv::Point2f> img_points, proj_points;
-            if (p.x>WINDOW_SIZE && p.y>WINDOW_SIZE && p.x+WINDOW_SIZE<pattern_image.cols && p.y+WINDOW_SIZE<pattern_image.rows)
+            //calculate projector corners
+            if (pattern_list.size() < model.rowCount<size_t>())
             {
-                for (unsigned h=p.y-WINDOW_SIZE; h<p.y+WINDOW_SIZE; h++)
-                {
-                    register const cv::Vec2f * row = pattern_image.ptr<cv::Vec2f>(h);
-                    register const cv::Vec2b * min_max_row = min_max_image.ptr<cv::Vec2b>(h);
-                    //cv::Vec2f * out_row = out_pattern_image.ptr<cv::Vec2f>(h);
-                    for (unsigned w=p.x-WINDOW_SIZE; w<p.x+WINDOW_SIZE; w++)
-                    {
-                        const cv::Vec2f & pattern = row[w];
-                        const cv::Vec2b & min_max = min_max_row[w];
-                        //cv::Vec2f & out_pattern = out_row[w];
-                        if (sl::INVALID(pattern))
-                        {
-                            continue;
-                        }
-                        if ((min_max[1]-min_max[0])<static_cast<int>(threshold))
-                        {   //apply threshold and skip
-                            continue;
-                        }
-
-                        img_points.push_back(cv::Point2f(w, h));
-                        proj_points.push_back(cv::Point2f(pattern));
-
-                        //out_pattern = pattern;
-                    }
-                }
-                cv::Mat H = cv::findHomography(img_points, proj_points, cv::RANSAC);
-                //std::cout << " H:\n" << H << std::endl;
-                cv::Point3d Q = cv::Point3d(cv::Mat(H*cv::Mat(cv::Point3d(p.x, p.y, 1.0))));
-                q = cv::Point2f(Q.x/Q.z, Q.y/Q.z);
+                pattern_list.resize(model.rowCount());
             }
-            else
+            if (min_max_list.size() < model.rowCount<size_t>())
             {
-                return;
+                min_max_list.resize(model.rowCount());
             }
 
-            //save
-            proj_corners.push_back(q);
+            processing_set_current_message(QString("Decoding... %1").arg(set_name));
+            cv::Mat& pattern_image = pattern_list[i];
+            cv::Mat& min_max_image = min_max_list[i];
+            if (!decode_gray_set(i, pattern_image, min_max_image))
+            {   //error
+                std::cout << "ERROR: Decode image set " << i << " failed. " << std::endl;
+                return ;
+            }
+            if (imageSize.width == 0)
+            {
+                imageSize = pattern_image.size();
+            }
+            else if (imageSize != pattern_image.size())
+            {
+                std::cout << "ERROR: pattern image of different size: set " << i << std::endl;
+                return ;
+            }
+
+            //cv::Mat out_pattern_image = sl::PIXEL_UNCERTAIN*cv::Mat::ones(pattern_image.size(), pattern_image.type());
+
+            processing_set_current_message(QString("Computing homographies... %1").arg(set_name));
+
+            calculate_projector_corners(cam_corners, proj_corners, pattern_image, min_max_image, threshold);
+
+
+            //save corners
+            save_corners_in_one_file(i, world_corners, cam_corners, proj_corners);
+
+            //calculate world corners
+            get_chessboard_world_coords(world_corners, corner_count, corner_size);
+
+            processing_message(QString(" * %1: finished").arg(set_name));
+            processing_set_progress_value(i + 1);
         }
 
-        processing_message(QString(" * %1: finished").arg(set_name));
-        processing_set_progress_value(i+1);
+
+        ////checked: use this set
+        //proj_corners.clear(); //erase previous points
+
+        //processing_set_current_message(QString("Decoding... %1").arg(set_name));
+
+        //cv::Mat & pattern_image = pattern_list[i];
+        //cv::Mat & min_max_image = min_max_list[i];
+        //if (!decode_gray_set(i, pattern_image, min_max_image))
+        //{   //error
+        //    std::cout << "ERROR: Decode image set " << i << " failed. " << std::endl;
+        //    return;
+        //}
+
+        //if (imageSize.width==0)
+        //{
+        //    imageSize = pattern_image.size();
+        //}
+        //else if (imageSize != pattern_image.size())
+        //{
+        //    std::cout << "ERROR: pattern image of different size: set " << i << std::endl;
+        //    return;
+        //}
+
+        ////cv::Mat out_pattern_image = sl::PIXEL_UNCERTAIN*cv::Mat::ones(pattern_image.size(), pattern_image.type());
+
+        //processing_set_current_message(QString("Computing homographies... %1").arg(set_name));
+
+        //calculate_projector_corners(cam_corners, proj_corners, pattern_image, min_max_image, threshold);
+
+        //processing_message(QString(" * %1: finished").arg(set_name));
+        //processing_set_progress_value(i+1);
     }
     processing_message("");
     
@@ -1087,6 +1640,33 @@ void Application::calibrate(void)
                                                 imageSize /*ignored*/, calib.R, calib.T, E, F, 
                                                 cv::CALIB_FIX_INTRINSIC /*cv::CALIB_USE_INTRINSIC_GUESS*/ + cal_flags,
 												cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 150, DBL_EPSILON));
+
+
+    ////calculate stereo_error in 3D space using chessboard parameters.
+    ////pipline : 1. calculate the 3d coordinatives of the corners in each chessboard
+    ///2. rigistrate each chessboard to standard chessboard and calculate the registration error
+    ///3. average registration error of all chessboard and use the average value as the stereo calibration error(mm) in 3d sapce
+    ///
+
+
+
+
+    std::vector<double> DistanceList;
+    bool visualize_registration_result = true;
+    for (int i = 0; i < camera_corners_active.size(); i++)
+    {
+        double distance=calculte_3d_chessboard_distance(camera_corners_active[i], projector_corners_active[i], world_corners_active[i], visualize_registration_result);
+        DistanceList.push_back(distance);
+      
+    }
+
+    double average_distance=0;
+    for (int i = 0; i < DistanceList.size(); i++)
+    {
+        average_distance += DistanceList[i];
+        std::cout << DistanceList[i] << std::endl;
+    }
+    calib.stereo_error_3d = average_distance / DistanceList.size();
     //print to console
     calib.display();
 
@@ -1127,44 +1707,11 @@ void Application::calibrate(void)
         std::vector<cv::Point2f> const& cam_corners = corners_camera.at(i);
         std::vector<cv::Point2f> const& proj_corners = corners_projector.at(i);
 
-        QString filename0 = QString("%1/world_%2.txt").arg(path).arg(i, 2, 10, QLatin1Char('0'));
-        FILE * fp0 = fopen(qPrintable(filename0), "w");
-        if (!fp0)
+        if (world_corners.size() > 0 && world_corners.size() == cam_corners.size() && world_corners.size() == proj_corners.size())
         {
-            std::cout << "ERROR: could no open " << std::string((const char *)filename0.toLocal8Bit()) << std::endl;
-            return;
+            save_corners_in_one_file(i, world_corners, cam_corners, proj_corners);
+            
         }
-        QString filename1 = QString("%1/cam_%2.txt").arg(path).arg(i, 2, 10, QLatin1Char('0'));
-        FILE * fp1 = fopen(qPrintable(filename1), "w");
-        if (!fp1)
-        {
-            std::cout << "ERROR: could no open " << std::string((const char *)filename1.toLocal8Bit()) << std::endl;
-            return;
-        }
-        QString filename2 = QString("%1/proj_%2.txt").arg(path).arg(i, 2, 10, QLatin1Char('0'));
-        FILE * fp2 = fopen(qPrintable(filename2), "w");
-        if (!fp2)
-        {
-            fclose(fp1);
-            std::cout << "ERROR: could no open " << std::string((const char *)filename2.toLocal8Bit()) << std::endl;
-            return;
-        }
-        std::cout << "Saved " << std::string((const char *)filename0.toLocal8Bit()) << std::endl;
-        std::cout << "Saved " << std::string((const char *)filename1.toLocal8Bit()) << std::endl;
-        std::cout << "Saved " << std::string((const char *)filename2.toLocal8Bit()) << std::endl;
-
-        std::vector<cv::Point3f>::const_iterator iter0 = world_corners.begin();
-        std::vector<cv::Point2f>::const_iterator iter1 = cam_corners.begin();
-        std::vector<cv::Point2f>::const_iterator iter2 = proj_corners.begin();
-        for (unsigned j=0; j<world_corners.size(); j++, ++iter0, ++iter1, ++iter2)
-        {
-            fprintf(fp0, "%lf %lf %lf\n", iter0->x, iter0->y, iter0->z);
-            fprintf(fp1, "%lf %lf\n", iter1->x, iter1->y);
-            fprintf(fp2, "%lf %lf\n", iter2->x, iter2->y);
-        }
-        fclose(fp0);
-        fclose(fp1);
-        fclose(fp2);
     }
 
     processing_message("Calibration finished");
@@ -1238,7 +1785,7 @@ bool Application::decode_gray_set(unsigned level, cv::Mat & pattern_image, cv::M
     //QList<unsigned> direct_component_images(QList<unsigned>() << 15 << 16 << 17 << 18 << 35 << 36 << 37 << 38);
     foreach (unsigned i, direct_component_images)
     {
-        images.push_back(get_image(level, i-1));
+        images.push_back(get_image(level, i-1, GrayImageRole));
     }
     cv::Mat direct_light = sl::estimate_direct_light(images, b);
     processing_message("Estimate direct and global light components... done.");
@@ -1312,6 +1859,72 @@ bool Application::decode_gray_set(unsigned level, cv::Mat & pattern_image, cv::M
     }
 
     return rv;
+}
+
+bool Application::decode_space_set(unsigned level, cv::Mat& pattern_image, cv::Mat& min_max_image, QWidget* parent_widget) const
+{
+    if (model.rowCount() < static_cast<int>(level))
+    {   //out of bounds
+        return false;
+    }
+
+    pattern_image = cv::Mat();
+    min_max_image = cv::Mat();
+
+    //progress
+    QProgressDialog* progress = NULL;
+    if (parent_widget)
+    {
+        progress = new QProgressDialog("Decoding...", "Abort", 0, 100, parent_widget,
+            Qt::Dialog | Qt::CustomizeWindowHint | Qt::WindowCloseButtonHint);
+        progress->setWindowModality(Qt::WindowModal);
+        progress->setWindowTitle("Processing");
+        progress->setMinimumWidth(400);
+        progress->show();
+    }
+
+    if (processing_canceled() || (progress && progress->wasCanceled()))
+    {   //abort
+        processing_set_current_message("Decode canceled");
+        processing_message("Decode canceled");
+        if (progress)
+        {
+            progress->close();
+            delete progress;
+            progress = NULL;
+        }
+        return false;
+    }
+    processEvents();
+
+    //parameters
+    const float b = config.value(ROBUST_B_CONFIG, ROBUST_B_DEFAULT).toFloat();
+    const unsigned m = config.value(ROBUST_M_CONFIG, ROBUST_M_DEFAULT).toUInt();
+
+    //estimate direct component
+    std::vector<cv::Mat> images;
+    int total_images = model.rowCount(model.index(level, 0));
+   
+    if (progress)
+    {
+        progress->setLabelText("Decoding: estimating direct and global light components...");
+        processEvents();
+    }
+
+    QList<unsigned> direct_component_images(QList<unsigned>() << 1 << 2);
+    foreach(unsigned i, direct_component_images)
+    {
+        images.push_back(get_image(level, i - 1));
+    }
+    cv::Mat direct_light = sl::estimate_direct_light(images, b);
+    processing_message("Estimate direct and global light components... done.");
+
+    std::vector<cv::Mat> channels;
+    cv::split(direct_light, channels);
+    cv::imshow("direct_light", channels.at(0));
+    cv::imshow("global_light", channels.at(1));
+    //cv::waitKey();
+
 }
 
 bool Application::load_calibration(QWidget * parent_widget)
@@ -1431,6 +2044,7 @@ void Application::compute_normals(scan3d::Pointcloud & pointcloud)
 
 void Application::get_chessboard_world_coords(std::vector<cv::Point3f> & world_corners, cv::Size corner_count, cv::Size corner_size)
 {
+    world_corners.clear();
     //generate world object coordinates
     for (int h=0; h<corner_count.height; h++)
     {

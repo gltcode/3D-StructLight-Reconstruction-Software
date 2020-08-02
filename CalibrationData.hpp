@@ -32,6 +32,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QString>
 #include <opencv2/core/core.hpp>
 
+
 class CalibrationData
 {
 public:
@@ -64,8 +65,8 @@ public:
 
     double cam_error;
     double proj_error;
-    double stereo_error;
-
+    double stereo_error;//reprojection error
+    double stereo_error_3d;//average distance between standard word corners and reconstructed 3d corners
     QString filename;
 };
 

@@ -29,6 +29,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define __PROJECTORWIDGET_HPP__
 
 #include <QWidget>
+#include <QTimer>
+#include <QTime>
+#include<opencv2/opencv.hpp>
 
 class ProjectorWidget : public QWidget
 {
@@ -68,6 +71,8 @@ protected:
     void make_pattern(void);
     void update_pattern_bit_count(void);
     static QPixmap make_pattern(int rows, int cols, int vmask, int voffset, int hmask, int hoffset, int inverted);
+    QPixmap make_space_pattern(int rows, int cols, int inverted);
+    void generate_sapce_pattern(int rows, int cols);
 
 private:
     int _screen;
@@ -77,6 +82,8 @@ private:
     int _vbits;
     int _hbits;
     volatile bool _updated;
+
+    cv::Mat _SpaceCodeImage;
 
 };
 

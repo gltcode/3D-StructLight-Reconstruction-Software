@@ -67,7 +67,9 @@ public slots:
     void on_display_calibration_action_triggered(bool checked = false);
     void on_reconstruct_dump_action_triggered(bool checked = false);
     void on_about_action_triggered(bool checked = false);
-
+    void on_eval_calib_by_cheess_3d_action_triggered(bool checked);
+    void on_eval_recons_by_board_action_triggered(bool checked);
+    void on_eval_recons_by_arbit_obj_action_triggered(bool checked);
     //buttons
     void on_select_all_button_clicked(bool checked = false);
     void on_select_none_button_clicked(bool checked = false);
@@ -104,6 +106,8 @@ public slots:
     void on_homography_window_spin_valueChanged(int i);
 
     //reconstruction group
+    void on_gray_code_radio_clicked(bool checked);
+    void on_space_code_radio_clicked(bool checked);
     void on_max_dist_line_editingFinished();
     void on_normals_check_stateChanged(int state);
     void on_colors_check_stateChanged(int state);

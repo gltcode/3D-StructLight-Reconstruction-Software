@@ -27,6 +27,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 #include "ProjectorWidget.hpp"
+#include<opencv2\opencv.hpp>
 
 #include <QApplication>
 #include <QDesktopWidget>
@@ -37,15 +38,17 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <assert.h>
 
 #include "structured_light.hpp"
+#include "Application.hpp"
 
-ProjectorWidget::ProjectorWidget(QWidget * parent, Qt::WindowFlags flags) : 
+ProjectorWidget::ProjectorWidget(QWidget* parent, Qt::WindowFlags flags) :
     QWidget(parent, flags),
     _screen(0),
     _current_pattern(-1),
     _pattern_count(4),
     _vbits(1),
     _hbits(1),
-    _updated(false)
+    _updated(false),
+    _SpaceCodeImage()
 {
 }
 
@@ -59,6 +62,7 @@ void ProjectorWidget::reset(void)
     _current_pattern = -1;
     _updated = false;
     _pixmap = QPixmap();
+    _SpaceCodeImage = cv::Mat();
     emit new_image(_pixmap);
 }
 
@@ -128,7 +132,14 @@ void ProjectorWidget::next(void)
 
 bool ProjectorWidget::finished(void)
 {
-    return (_current_pattern+2 > 2+4*_pattern_count);
+    if (APP->config.value("reconstruction/Code_Mode", Gray_Code) == Gray_Code)
+    {
+        return (_current_pattern + 2 > 2 + 4 * _pattern_count);
+    }
+    else if (APP->config.value("reconstruction/Code_Mode", Space_Code) == Space_Code)
+    {
+        return (_current_pattern > 2 * _pattern_count-2);
+    }
 }
 
 void ProjectorWidget::paintEvent(QPaintEvent *)
@@ -163,25 +174,36 @@ void ProjectorWidget::paintEvent(QPaintEvent *)
 
 void ProjectorWidget::update_pattern_bit_count(void)
 {
-    int cols = width();
-    int rows = height();
+    if (APP->config.value("reconstruction/Code_Mode", Gray_Code) == Gray_Code)
+    {
+        int cols = width();
+        int rows = height();
 
-    //search bit number
-    _vbits = 1;
-    _hbits = 1;
-    for (int i=(1<<_vbits); i<cols; i=(1<<_vbits)) { _vbits++; }
-    for (int i=(1<<_hbits); i<rows; i=(1<<_hbits)) { _hbits++; }
-    _pattern_count = std::min(std::min(_vbits, _hbits), _pattern_count);
-    std::cerr << " vbits " << _vbits << " / cols="<<cols<<", mvalue="<< ((1<<_vbits)-1) << std::endl;
-    std::cerr << " hbits " << _hbits << " / rows="<<rows<<", mvalue="<< ((1<<_hbits)-1) << std::endl;
-    std::cerr << " pattern_count="<< _pattern_count << std::endl; 
+        //search bit number
+        _vbits = 1;
+        _hbits = 1;
+        for (int i = (1 << _vbits); i < cols; i = (1 << _vbits)) { _vbits++; }
+        for (int i = (1 << _hbits); i < rows; i = (1 << _hbits)) { _hbits++; }
+        _pattern_count = std::min(std::min(_vbits, _hbits), _pattern_count);
+        std::cerr << "[ GRAY CODE MODE]" << std::endl;
+        std::cerr << " vbits " << _vbits << " / cols=" << cols << ", mvalue=" << ((1 << _vbits) - 1) << std::endl;
+        std::cerr << " hbits " << _hbits << " / rows=" << rows << ", mvalue=" << ((1 << _hbits) - 1) << std::endl;
+        std::cerr << " pattern_count=" << _pattern_count << std::endl;
+    }
+    else if (APP->config.value("reconstruction/Code_Mode", Space_Code) == Space_Code)
+    {
+        _pattern_count = 1;
+        std::cerr << "[ SPACE CODE MODE]" << std::endl;
+        std::cerr << " pattern_count=" << _pattern_count << std::endl;
+    }
 }
 
 void ProjectorWidget::make_pattern(void)
 {
     int cols = width();
     int rows = height();
-
+    if (APP->config.value("reconstruction/Code_Mode", Gray_Code) == Gray_Code)
+    {
     /*
     if (_current_pattern<1)
     {   //search bit number
@@ -243,6 +265,13 @@ void ProjectorWidget::make_pattern(void)
     }
 
     //_pixmap.save(QString("pat_%1.png").arg(_current_pattern, 2, 10, QLatin1Char('0')));
+    }
+    else if (APP->config.value("reconstruction/Code_Mode", Space_Code) == Space_Code)
+    {
+        int inverted = (_current_pattern % 2) == 1;
+
+        _pixmap = make_space_pattern( rows,  cols, inverted);
+    }
 }
 
 QPixmap ProjectorWidget::make_pattern(int rows, int cols, int vmask, int voffset, int hmask, int hoffset, int inverted)
@@ -270,6 +299,268 @@ QPixmap ProjectorWidget::make_pattern(int rows, int cols, int vmask, int voffset
 
     return QPixmap::fromImage(image);
 }
+
+cv::Mat rotateImage1(cv::Mat img, int degree, int mode = 1)
+{
+    degree = -degree;
+    double angle = degree * CV_PI / 180.; // 弧度  
+    double a = sin(angle), b = cos(angle);
+    int width = img.cols;
+    int height = img.rows;
+    int width_rotate;
+    int height_rotate;
+    if (mode == 0)
+    {
+        width_rotate = int(pow(2, 0.5) * (width / 2 + height / 2) / 2);
+        height_rotate = int(pow(2, 0.5) * (width / 2 + height / 2) / 2);
+    }
+    else if (mode == 1 || mode == 2)
+    {
+        width_rotate = int(height * fabs(a) + width * fabs(b));
+        height_rotate = int(width * fabs(a) + height * fabs(b));
+    }
+
+    //旋转数组map
+    // [ m0  m1  m2 ] ===>  [ A11  A12   b1 ]
+    // [ m3  m4  m5 ] ===>  [ A21  A22   b2 ]
+    float map[6];
+    cv::Mat map_matrix = cv::Mat(2, 3, CV_32F, map);
+    // 旋转中心
+    cv::Point2f center = cv::Point2f(width / 2, height / 2);
+    map_matrix = cv::getRotationMatrix2D(center, degree, 1.0);
+    std::cout << (width_rotate - width) / 2 << " " << (height_rotate - height) / 2 << std::endl;
+    std::cout << map_matrix << std::endl;
+    map_matrix.at<double>(0, 2) += (width_rotate - width) / 2;
+    map_matrix.at<double>(1, 2) += (height_rotate - height) / 2;
+    std::cout << map_matrix << std::endl;
+    cv::Mat img_rotate;
+    //对图像做仿射变换
+    //CV_WARP_FILL_OUTLIERS - 填充所有输出图像的象素。
+    //如果部分象素落在输入图像的边界外，那么它们的值设定为 fillval.
+    //CV_WARP_INVERSE_MAP - 指定 map_matrix 是输出图像到输入图像的反变换，
+    cv::warpAffine(img, img_rotate, map_matrix, cv::Size(width_rotate, height_rotate), cv::INTER_LINEAR, cv::BORDER_CONSTANT, 0);
+    if (mode == 2)
+    {
+        cv::Range Range_rows = cv::Range(int(width * fabs(a)), height_rotate - int(width * fabs(a)));
+        cv::Range Rangey_cols = cv::Range(int(height * fabs(a)), width_rotate - int(height * fabs(a)));
+
+        img_rotate = img_rotate(Range_rows, Rangey_cols);
+    }
+    return img_rotate;
+}
+
+
+void ProjectorWidget::generate_sapce_pattern(int rows, int cols)
+{
+
+    int cubelength = 5;
+    int RowSideCount = 16;
+    int ColsSideCount = 32;
+    cv::Mat CodeImage(2 * RowSideCount * cubelength, ColsSideCount * cubelength, CV_8UC1, cv::Scalar(0));
+    //imshow("CodeImage1", CodeImage);
+
+
+    for (int i = 0; i < RowSideCount; i++)
+    {
+        for (int rowOfCude = 0; rowOfCude < cubelength; rowOfCude++)
+        {
+            uchar* dataOfEachRow = CodeImage.ptr<uchar>(2 * i * cubelength + rowOfCude);
+            for (int j = 0; j < ColsSideCount; j++)
+            {
+                uchar value;
+                if (j % 2 == 1)
+                {
+                    value = 128;
+                }
+                else
+                {
+                    value = 0;
+                }
+                for (int k = 0; k < cubelength; k++)
+                {
+                    dataOfEachRow[j * cubelength + k] = value;
+                }
+            }
+        }
+        for (int rowOfCude = 0; rowOfCude < cubelength; rowOfCude++)
+        {
+            uchar* dataOfEachRow = CodeImage.ptr<uchar>((2 * i + 1) * cubelength + rowOfCude);
+            for (int j = 0; j < ColsSideCount; j++)
+            {
+                uchar value;
+                if (j % 2 == 1)
+                {
+                    value = 255;
+                }
+                else
+                {
+                    value = 125;
+                }
+                for (int k = 0; k < cubelength; k++)
+                {
+                    dataOfEachRow[j * cubelength + k] = value;
+                }
+            }
+        }
+        //for(int i)
+    }
+    cv::RotatedRect rRect = cv::RotatedRect(cv::Point2f(CodeImage.rows / 2, CodeImage.cols / 2), cv::Size2f(pow(2, 0.5) * 2 * RowSideCount * cubelength / 2, pow(2, 0.5) * ColsSideCount * cubelength / 2), 45); //定义一bai个旋转矩形
+    cv::Point2f vertices[4];
+    rRect.points(vertices);//提取旋转矩形的四个角点du
+    for (int i = 0; i < 4; i++)
+    {
+        cv::line(CodeImage, vertices[i], vertices[(i + 1) % 4], cv::Scalar(0, 255, 0));//四个角点连成线，最终形成旋转的矩形。
+    }
+
+    std::vector<bool> firstRow = { 1,1,0,0,1,0,0,1,1,0,1,0,0,0,1,1 };
+    std::vector<bool> secondRow = { 1,1,0,0,1,1,1,1,0,0,0,1,0,1,0,0 };
+
+    for (int i = 0; i < firstRow.size(); i++)
+    {
+        if (i % 2 == 0)
+        {
+            bool tem_value = firstRow[i];
+            firstRow[i] = secondRow[i];
+            secondRow[i] = tem_value;
+        }
+    }
+
+    for (int i = RowSideCount - 1; i < 2 * RowSideCount; i++) //i-th row
+    {
+        int inedx_colum = i - (RowSideCount - 1);  //the index of the row colored now
+        int count = 0;   //the number of colored cube in each line
+        int start_row = i;
+        int start_col = i - (RowSideCount - 1);
+
+        while (count < 16)
+        {
+            int tem_value;
+
+            if (inedx_colum % 2 == 0)
+            {
+                if (firstRow[count])
+                {
+                    tem_value = -75;
+                }
+                else
+                {
+                    tem_value = 75;
+                }
+
+            }
+            else
+            {
+                if (secondRow[count])
+                {
+                    tem_value = -75;
+                }
+                else
+                {
+                    tem_value = 75;
+                }
+            }
+
+            for (int k = 0; k < cubelength; k++)
+            {
+                uchar* DataOfEachRow = CodeImage.ptr<uchar>(start_row * cubelength + k);
+                for (int num = start_col * cubelength; num < start_col * cubelength + cubelength; num++)
+                {
+                    DataOfEachRow[num] += tem_value;
+                }
+            }
+
+            start_row--;
+            start_col++;
+            count++;
+        }
+    }
+
+    //imshow("CodeImage2", CodeImage);
+
+    //GaussianBlur(CodeImage, CodeImage, Size(5, 5), 10, 10);
+    cv::blur(CodeImage, CodeImage, cv::Size(5, 5));
+    //imshow("CodeImage3", CodeImage);
+    CodeImage = rotateImage1(CodeImage, 45, 0);
+    //imshow("CodeImage4", CodeImage);
+    int Threshold = 120;
+    for (int i = 0; i < CodeImage.rows; i++)
+    {
+        uchar* DataOfEachRow = CodeImage.ptr<uchar>(i);
+        for (int j = 0; j < CodeImage.cols; j++)
+        {
+            if (DataOfEachRow[j] > Threshold)
+            {
+                DataOfEachRow[j] = 255;
+            }
+            else
+            {
+                DataOfEachRow[j] = 0;
+            }
+        }
+    }
+    //imshow("CodeImage5", CodeImage);
+
+    int repeatrow = (int)(rows / CodeImage.rows) * 2;
+    int repeatcol = (int)(cols / CodeImage.cols) * 2;
+    cv::Mat RepeatCodeImage(CodeImage.rows * repeatrow, CodeImage.cols * repeatcol, CV_8UC1, cv::Scalar(0));
+    for (int i = 0; i < repeatrow; i++)
+    {
+        for (int j = 0; j < repeatcol; j++)
+        {
+            for (int index_row = 0; index_row < CodeImage.rows; index_row++)
+            {
+                for (int index_col = 0; index_col < CodeImage.cols; index_col++)
+                {
+                    RepeatCodeImage.at<uchar>(i * CodeImage.rows + index_row, j * CodeImage.cols + index_col)
+                        = CodeImage.at<uchar>(index_row, index_col);
+                }
+            }
+        }
+    }
+    //imshow("CodeImage6", RepeatCodeImage);
+    ////RepeatCodeImage = rotateImage1(RepeatCodeImage, 10, 1);
+
+    //imshow("CodeImage7", rotateImage1(RepeatCodeImage, 10, 1));
+
+    RepeatCodeImage = rotateImage1(RepeatCodeImage, 10, 2);
+    cv::Range Range_rows = cv::Range(0, rows);
+    cv::Range Range_cols = cv::Range(0, cols);
+    this->_SpaceCodeImage = RepeatCodeImage(Range_rows, Range_cols).clone();
+    imshow("Pattern", this->_SpaceCodeImage);
+
+}
+
+QPixmap ProjectorWidget::make_space_pattern(int rows, int cols, int inverted)
+{
+    if (this->_SpaceCodeImage.empty())
+    {
+        generate_sapce_pattern(rows, cols);
+    }
+    cv::Mat ShowPattern;
+    QImage image = QImage(cols, rows, QImage::Format_Indexed8);
+    if (inverted)
+    {
+        ShowPattern = 255 - this->_SpaceCodeImage;
+        image = QImage((const unsigned char*)(ShowPattern.data), ShowPattern.cols, ShowPattern.rows, QImage::Format_Grayscale8);
+    }
+    else
+    {
+        ShowPattern = this->_SpaceCodeImage;
+        image = QImage((const unsigned char*)(ShowPattern.data), ShowPattern.cols, ShowPattern.rows, QImage::Format_Grayscale8);
+    }
+
+
+    //gray_codes.clear();
+    //Mat emptyCode(RepeatCodeImage.rows, RepeatCodeImage.cols, CV_8UC1, Scalar(0));
+    //gray_codes.push_back(emptyCode);
+    //gray_codes.push_back(RepeatCodeImage);
+
+    //imshow("inverseCode", inverseCode);
+    //gray_codes.push_back(inverseCode);
+    return QPixmap::fromImage(image);
+}
+
+
 
 bool ProjectorWidget::save_info(QString const& filename, bool invert) const
 {

@@ -46,6 +46,23 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ProcessingDialog.hpp"
 #include "CalibrationData.hpp"
 #include "scan3d.hpp"
+
+#include<vtkSmartPointer.h>
+#include<vtkPolyData.h>
+#include<vtkPoints.h>
+#include<vtkLandmarkTransform.h>
+#include<vtkTransformPolyDataFilter.h>
+#include<vtkPolyDataMapper.h>
+#include <vtkActor.h>
+#include <vtkProperty.h>
+#include <vtkRenderer.h>
+#include <vtkRenderWindow.h>
+#include <vtkRenderWindowInteractor.h>
+
+#include<vtkVertexGlyphFilter.h>
+
+#include <stdio.h>
+#include <io.h>
 //#include<pcl/point_cloud.h>
 //#include <pcl/point_types.h>
 #if defined(_MSC_VER) && !defined(isnan)
@@ -78,6 +95,9 @@ enum Role {ImageFilenameRole = Qt::UserRole, GrayImageRole, ColorImageRole,
 #define HOMOGRAPHY_WINDOW_DEFAULT        60
 
 //reconstruction
+enum CodeMode { Gray_Code = 0,Space_Code };
+#define CODE_MODE_CONFIG        "reconstruction/Code_Mode"
+#define CODE_MODE_DEFAULT       0
 #define MAX_DIST_CONFIG         "reconstruction/max_dist"
 #define MAX_DIST_DEFAULT        100.0
 #define SAVE_NORMALS_CONFIG     "reconstruction/save_normals"
@@ -109,14 +129,18 @@ public:
     int get_camera_height(unsigned level = 0) const;
     int get_projector_width(unsigned level = 0) const;
     int get_projector_height(unsigned level = 0) const;
-
+    bool extract_chessboard_corners_from_single_image(unsigned level, unsigned n);
     bool extract_chessboard_corners(void);
     static void get_chessboard_world_coords(std::vector<cv::Point3f> & world_corners, cv::Size corner_count, cv::Size corner_size);
     void decode_all(void);
     void decode(int level, QWidget * parent_widget = NULL);
+    void calculate_projector_corners(std::vector<cv::Point2f> const& cam_corners, std::vector<cv::Point2f>& proj_corners, cv::Mat& pattern_image, cv::Mat& min_max_image, unsigned threshold);
+    double calculte_3d_chessboard_distance(std::vector<cv::Point2f>& camera_corners, std::vector<cv::Point2f>& projector_corners, std::vector<cv::Point3f>& world_corners, bool visualize_registration_result);
+    void save_corners_in_one_file(int level, std::vector<cv::Point3f> const& world_corners, std::vector<cv::Point2f> const& cam_corners, std::vector<cv::Point2f> const& proj_corners);
     void calibrate(void);
 
     bool decode_gray_set(unsigned level, cv::Mat & pattern_image, cv::Mat & min_max_image, QWidget * parent_widget = NULL) const;
+    bool decode_space_set(unsigned level, cv::Mat& pattern_image, cv::Mat& min_max_image, QWidget* parent_widget = NULL) const;
     bool dump_decoded(const char* filename, int type, cv::Mat2f const& pattern_image, cv::Mat2b const& min_max_image, cv::Mat3b const& color_image) const;
     bool load_dump(const char* filename, int type, cv::Mat2f & pattern_image, cv::Mat2b & min_max_image, cv::Mat3b & color_image) const;
 
@@ -133,7 +157,7 @@ public:
     //calibration
     bool load_calibration(QWidget * parent_widget = NULL);
     bool save_calibration(QWidget * parent_widget = NULL);
-
+    bool LoadCorners();
     //reconstruction
     void reconstruct_model(int level, scan3d::Pointcloud & pointcloud, QWidget * parent_widget = NULL);
     void reconstruct_model_dump(cv::Mat2f const& pattern_image, cv::Mat2b const& min_max_image, cv::Mat3b const& color_image, scan3d::Pointcloud & pointcloud, QWidget * parent_widget = NULL);
@@ -142,7 +166,10 @@ public:
     void make_pattern_images(int level, cv::Mat & col_image, cv::Mat & row_image);
     cv::Mat get_projector_view(int level, bool force_update = false);
 
-	bool Application::get3DdataPath(unsigned level, unsigned n, std::string & FilePath);
+	bool get3DdataPath(unsigned level, unsigned n, std::string & FilePath);
+    bool eval_calibe_3d_error_by_checkeroard(QWidget* parent_widget=NULL);
+
+
     //model
     void select_none(void);
     void select_all(void);

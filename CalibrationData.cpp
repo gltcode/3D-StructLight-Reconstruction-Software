@@ -36,7 +36,7 @@ CalibrationData::CalibrationData() :
     cam_K(), cam_kc(),
     proj_K(), proj_kc(),
     R(), T(),
-    cam_error(0.0), proj_error(0.0), stereo_error(0.0),
+    cam_error(0.0), proj_error(0.0), stereo_error(0.0), stereo_error_3d(0.0),
     filename()
 {
 }
@@ -101,7 +101,7 @@ bool CalibrationData::load_calibration_yml(QString const& filename)
     fs["cam_error"] >> cam_error;
     fs["proj_error"] >> proj_error;
     fs["stereo_error"] >> stereo_error;
-
+    fs["stereo_error_3d"] >> stereo_error_3d;
     fs.release();
 
     this->filename = filename;
@@ -123,6 +123,7 @@ bool CalibrationData::save_calibration_yml(QString const& filename)
        << "cam_error" << cam_error
        << "proj_error" << proj_error
        << "stereo_error" << stereo_error
+       <<"stereo_error_3d"<< stereo_error_3d
        ;
     fs.release();
 
@@ -174,19 +175,20 @@ bool CalibrationData::save_calibration_matlab(QString const& filename)
 void CalibrationData::display(std::ostream & stream) const
 {
     stream << "Camera Calib: " << std::endl
-        << " - reprojection error: " << cam_error << std::endl
+        << " - reprojection error: " << cam_error << " pixels" << std::endl
         << " - K:\n" << cam_K << std::endl
         << " - kc: " << cam_kc << std::endl
         ;
     stream << std::endl;
     stream << "Projector Calib: " << std::endl
-        << " - reprojection error: " << proj_error << std::endl
+        << " - reprojection error: " << proj_error << " pixels" << std::endl
         << " - K:\n" << proj_K << std::endl
         << " - kc: " << proj_kc << std::endl
         ;
     stream << std::endl;
     stream << "Stereo Calib: " << std::endl
-        << " - reprojection error: " << stereo_error << std::endl
+        << " - reprojection error: " << stereo_error << " pixels"<<std::endl
+        << "- Average 3d error: " << stereo_error_3d << " mm" << std::endl
         << " - R:\n" << R << std::endl
         << " - T:\n" << T << std::endl
         ;
